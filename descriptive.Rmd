@@ -1,0 +1,106 @@
+---
+title: "Assignment 1: An analysis of the relationship between age and self-reported health level"
+author: "Oles Matiushenko"
+date: "Jan 20, 2025"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+## Introduction
+
+In this report, I investigate the relationship between age and self-reported level of health. Anecdotal evidence suggests that physical health declines as we get older. I intend to verify if this is indeed the case using the National Health and Nutrition Examination Study data.
+
+```{r libraries}
+
+library(tidyverse)
+library(NHANES)
+library(kableExtra)
+
+```
+
+## The Set-up
+
+I will be using two variables from the NHANES dataset for the analysis: *Age*, which is a continuous numeric variable, and *HealthGen*, which is a categorical variable. The relationship between the chosen variables can be best illustrated with a box plot. Box plots show the distribution of the continuous variable and allow for easy comparison across categories.
+
+## Results
+
+```{r box plot}
+
+main_color = "grey30"
+font_size = 8
+
+# Drop data that won't be used
+
+health_data <- NHANES %>% 
+  filter(SurveyYr == "2011_12",
+         is.na(HealthGen) == FALSE) %>% 
+  select(Age, HealthGen) %>% 
+  mutate(HealthGen = as.ordered(
+                      fct_recode(HealthGen, "Very good" = "Vgood")
+                      )
+         )
+
+# Produce a plot
+
+health_data %>% 
+  ggplot(aes(x = HealthGen, y = Age)) +
+  geom_boxplot(color = main_color) +
+  
+  scale_x_discrete(labels = c("Excellent", 
+                              "Very good", 
+                              "Good", 
+                              "Fair", 
+                              "Poor")) +
+  scale_y_continuous(breaks = seq(10, 80, 10)) +
+  
+  geom_hline(yintercept = 10, color = "black") +
+  
+  labs(title = "People tend to feel less healthy with age",
+       subtitle = "Based on over 3700 survey responses",
+       x = "Self-reported health level",
+       y = "Age, years",
+       caption = "Data source: The 2011-2012 US National Health and Nutrition Examination Study") +
+  
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", size = 10),
+        plot.subtitle = element_text(size = font_size),
+        axis.title.y = element_text(hjust = 1, size = font_size),
+        axis.title.x = element_text(hjust = 1, size = font_size),
+        axis.text = element_text(color = main_color, size = font_size),
+        plot.caption = element_text(face = "italic", 
+                                    color = main_color, 
+                                    hjust = 0, 
+                                    size = 7),
+        plot.margin = margin(0.5, 0.5, 0.5, 0.5, "cm"),
+        panel.grid.minor = element_blank())
+
+```
+
+The graph clearly demonstrates that younger people tend to feel healthier than older people. An increase in the median age from left to right is consistent with declining health; the median age of respondents increases from 36.0 (IQR 34.0) years in the "Excellent" health category to 58.0 (IQR 18.0) years in the "Poor" health category.
+
+The median (and, especially, the mean) age of the subjects who consider themselves to be in "Excellent", "Very good", or "Good" health condition is relatively similar (Table 1). A pronounced increase in the median age occurs between "Good" and "Fair" health condition categories and, another one, between "Fair" and "Poor" health condition categories. 
+
+Age of the subjects in the "Poor" health category is noticeably less spread out than in other categories. Apart from a single very young outlier, most data points sit closely around the median.
+
+```{r table}
+
+health_data %>% 
+  group_by(HealthGen) %>% 
+  summarise(n = n(),
+            Median = median(Age),
+            IQR = round(IQR(Age), 1),
+            Mean = round(mean(Age), 1),
+            Std.Dev. = round(sd(Age), 1)) %>% 
+  rename('Health Level' = HealthGen) %>% 
+  kbl(caption = "<b>Table 1: Age by health level category (years)<b>",
+      align = c("lccccc")) %>% 
+  kable_styling() 
+
+```
+
+
+
+

@@ -1,0 +1,637 @@
+---
+title: "Analysis of mHealth app user data and evidence-based recommendations"
+author: "Oles Matiushenko"
+date: "2025-02-18"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+## Preface
+
+### A note on p-value and hypothesis testing
+
+A p-value is a common output of statistical tests, something that will be seen frequently throughout this report. A p-value denotes the probability of observing a sample (e.g., group of people, series of events) -- and a test parameter that characterises it (e.g., mean medication adherence) -- as usual/unusual as the sample at hand, given that the *null hypothesis* is true. A null hypothesis, or H0, is the default assumption that we are trying to reject. Typically, a null hypothesis states that the compared parameters are *equal* (i.e., there is no difference between the groups).
+
+A very low p-value suggests that the compared parameters are unlikely to be equal. What a "very low" p-value is may vary. In health care research, it is common to use a significance level of 5% (alpha = 0.05) as a threshold between statistically significant and insignificant results. For example, if a test yields a p-value that is less than 0.05, we can say that there is strong evidence to reject the null hypothesis (e.g, the means are equal between compared groups and any observed difference are likely coincidental) in favor of the *alternative hypothesis*, or H1 (e.g., the means are not equal between compared groups and any observed differences are unlikely to be due to chance).
+
+### A note on test assumptions
+
+Parametric tests, such as those used in this study, assume certain characteristics of the sample data. Verifying these assumptions is crucial for confirming the validity of the test results. However, not all assumptions are always equally important. Sometimes, it is possible for some of the less critical assumptions to be violated and the test results to be still valid.
+
+While preparing the report, I checked the assumptions for every conducted test. However, for the sake of brevity, I did not make a record of verifying the assumptions that could be checked by visual inspection (e.g., the expected count for each category should be no less than 5 for the chi-square test) or those that are guaranteed by the study design (e.g., independence of observations for the t-test and ANOVA). If checking such assumptions is not mentioned explicitly, it is implied that they were met. Any assumptions that required extra steps (such as plotting or performing tests) for verification were reported explicitly.
+
+### Report structure
+Large code chunks interspersed with text impede reading. To streamline the report and improve readability, I organised code chunks with data manipulation at the top of the report. I hope this will contribute to a more enjoyable reviewing experience.
+
+```{r libraries}
+
+library(tidyverse)
+library(here)
+library(car)
+library(kableExtra)
+library(emmeans)
+
+```
+
+
+```{r loading-data}
+
+mhealth_data <- read.csv(here("data/mHealth_assessmentdata_2025.csv"))
+
+```
+
+## Code
+
+### Part 1 code
+
+```{r part-1}
+
+# Overall age stats
+age_stats <- mhealth_data %>% 
+  summarise(Mean = round(mean(age, 1)), 
+            SD = round(sd(age), 1), 
+            range = round(range(age), 1))
+
+
+# Age stats by sex 
+age_stats_by_sex <- mhealth_data %>% 
+  group_by(sex) %>% 
+  summarise(Mean = round(mean(age), 1), 
+            SD = round(sd(age), 1), 
+            n = n())
+
+
+# These variables are used later in the text
+n_males <- age_stats_by_sex %>% 
+  filter(sex == "M") %>% 
+  pull(n)
+
+
+n_females <- age_stats_by_sex %>% 
+  filter(sex == "F") %>% 
+  pull(n)
+
+
+n_total <- n_males + n_females
+
+
+# Preparing the graph
+theme_color = "dimgray"
+font_size = 10
+caption <- "Data source: 2025 mHealth assessment data"
+
+
+# Reusable custom settings for box-plots
+boxplot_theme_settings <- theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", 
+                              size = 11),
+    plot.subtitle = element_text(size = font_size),
+    axis.title.y = element_text(hjust = 1, 
+                                size = font_size),
+    axis.title.x = element_blank(),
+    axis.text = element_text(color = theme_color, 
+                             size = font_size),
+    plot.caption = element_text(face = "italic", 
+                                color = theme_color, 
+                                hjust = 0, 
+                                size = 7),
+    plot.margin = margin(0.5, 0.5, 0.5, 0.5, "cm"),
+    panel.grid.y = element_blank()
+    )
+
+
+# Reusable custom settings for other plots
+plot_theme_settings <- theme_bw() +
+  theme(
+    plot.title = element_text(face = "bold", 
+                              size = 11),
+    axis.title.y = element_text(size = font_size), 
+    axis.title.x = element_text(size = font_size), 
+    plot.margin = margin(0.5, 1, 0.25, 0.5, "cm"),
+    plot.caption = element_text(face = "italic", 
+                                hjust = 0, 
+                                size = 7)
+    )
+
+
+p_age_variance <- mhealth_data %>% 
+  ggplot(aes(x = factor(sex, level = c("M", "F")), 
+             y = age)) +
+  geom_boxplot(color = theme_color) + 
+  scale_x_discrete(labels = c("Males", "Females")) +
+  scale_y_continuous(breaks = seq(0, 100, 20)) +
+  labs(title = "Figure 1: Age varied comparably within sexes",
+       y = "Age, years", 
+       caption = caption) + boxplot_theme_settings
+
+
+```
+
+
+```{r summary-table}
+
+# Preparing the summary table 
+
+age <- age_stats_by_sex %>% 
+  arrange(Mean) %>% 
+  mutate(
+    Age = paste(Mean, "\u00b1", SD)) %>% 
+  select(sex, Age) %>% 
+  pivot_wider(names_from = sex, 
+              values_from = Age) %>% 
+  bind_cols(" " = "Age (Mean \u00b1 SD)") %>% 
+  select(" ", M, F)
+
+
+condition <- mhealth_data %>% 
+  group_by(sex, condition) %>% 
+  summarise(n = n(), .groups = "drop") %>% 
+  pivot_wider(names_from = sex, 
+              values_from = n) %>% 
+  mutate(across(where(is.integer), as.character)) %>% 
+  rename(" " = condition)
+
+
+demography <- bind_rows(age, 
+                        c(" " = "Condition (n)", M = " ", F = " "), 
+                        condition)
+
+
+new_names <- c(" ", 
+               paste0("Males (n = ", n_males, ")"), 
+               paste0("Females (n = ", n_females, ")")
+               )
+
+
+colnames(demography) <- new_names
+
+
+t_demography <- demography %>% 
+  kable(caption = "Demographic characteristics of the study participants", 
+        format = "latex", 
+        booktabs = TRUE, 
+        align = c("l", "c", "c")) %>% 
+  kable_styling(latex_options = "hold_position") %>% 
+  column_spec(1, width = "2.5in") %>% 
+  column_spec(2, width = "1.75in") %>%
+  column_spec(3, width = "1.75in") %>% 
+  add_indent(c(3:5)) %>% 
+  footnote("SD - standard deviation")
+
+```
+
+### Part 2 code
+
+```{r part 2 code}
+
+# Contingency table and chi-square test
+contingency_table <- as.data.frame.matrix(
+  table(
+    mhealth_data$condition, 
+    mhealth_data$mHealth_app_usage
+    )
+  )
+
+
+t_contingency_table <- contingency_table %>%
+  kable(
+    caption = "Subjects by condition and mHealth app usage",
+    format = "latex",
+    booktabs = TRUE,
+    align = c(rep("c", 4))
+  ) %>%
+  kable_styling(latex_options = "hold_position") %>%
+  column_spec(1,   width = "2in") %>% 
+  column_spec(2:5, width = "1in")
+
+
+chisq <- chisq.test(contingency_table)
+
+
+# Adherence data
+adherence <- mhealth_data %>% 
+  mutate(mHealth_app_usage = factor(mHealth_app_usage, levels = c(
+    "Never", "Rarely", "Occasionally", "Regularly")),
+    sex = factor(sex, levels = c("M", "F")))
+
+
+# Adherence among regular users data
+adherence_regular <- adherence %>% 
+  filter(mHealth_app_usage == "Regularly")
+
+
+adherence_stats <- adherence_regular %>%
+  group_by(sex) %>% 
+  summarise(
+    mean    = round(mean(medication_adherence), 1), 
+    sd      = round(sd(medication_adherence), 1),
+    .groups = "drop"
+    )
+
+
+# Box-plot for testing homogeneity of variance
+p_adherence_regular_boxplot <- adherence_regular %>% 
+  ggplot(aes(x = sex, 
+             y = medication_adherence)) +
+  geom_boxplot(color = theme_color) + 
+  scale_x_discrete(labels = c("Males", "Females")) +
+  scale_y_continuous(breaks = seq(80, 110, 5)) +
+  labs(title = "Figure 2: Adherence by sex among regular app users",
+       y = "Adherence, %", 
+       caption = caption) + 
+  boxplot_theme_settings
+
+
+# Histogram
+p_adherence_regular_hist <- adherence_regular %>% 
+  ggplot(aes(x = medication_adherence)) +
+  geom_histogram(bins = 30, 
+                 color = "black", 
+                 fill = "lightblue") +          
+  labs(title = "Figure 3: Distribution of adherence is close to normal", 
+       x = "Adherence, %", 
+       y = "Subjects, n") + 
+  plot_theme_settings
+
+```
+
+### Part 3 code
+
+```{r part 3 code}
+
+# Adherence stats
+t_adherence_all <- adherence %>%
+  group_by(mHealth_app_usage) %>%
+  summarise(Mean = round(mean(medication_adherence), 1),
+            SD = round(sd(medication_adherence), 1)
+            ) %>%
+  rename("mHealth usage category" = mHealth_app_usage) %>%
+  kable(
+    caption = "Demographic characteristics of the study participants",
+    format = "latex",
+    booktabs = TRUE,
+    align = c("l", "c", "c", "c")
+  ) %>%
+  kable_styling(latex_options = "hold_position") %>%
+  column_spec(1, width = "2.8in") %>% 
+  column_spec(2:3, width = "1.6in") %>%
+  footnote("SD - standard deviation")
+
+
+# Adherence by app usage boxplot
+p_adherence_all_boxplot <- adherence %>%
+  ggplot(aes(x = mHealth_app_usage, y = medication_adherence)) +
+  
+  geom_boxplot() + 
+  geom_boxplot(color = theme_color) + 
+  
+  labs(title = "Figure 4: Medication adherence increases with app usage",
+       y = "Adherence, %", caption = caption) + 
+  boxplot_theme_settings
+
+```
+
+
+```{r anova}
+ANOVA1 <- aov(medication_adherence ~ mHealth_app_usage, data = mhealth_data)
+```
+
+
+```{r normality of residuals anova}
+
+model <- tibble(
+  fitted = fitted(ANOVA1),
+  residuals = resid(ANOVA1),
+  category = adherence$mHealth_app_usage
+)
+
+
+p_res_normality <- ggplot(model, aes(fitted, residuals, colour = category)) +
+  geom_point() + geom_hline(aes(yintercept = 0), color = "red") +
+  labs(
+    title = "Figure 5: Residuals are normally distributed",
+    x = "Fitted",
+    y = "Residuals",
+    color = "App usage category"
+  ) +
+  plot_theme_settings
+
+```
+
+### Part 4 code
+
+```{r scatter}
+
+p_scatter <- mhealth_data %>% 
+  ggplot(aes(x = hospital_days, y = sf36_score)) +
+  geom_point(alpha = 0.5) + 
+  geom_smooth(method = lm, color = "red", se = FALSE) +
+  labs(x = "Hospital days", y = "Sf36 health score",
+       title = "Figure 6: Length of hospital stay and Sf36 health score",
+       caption = caption) + plot_theme_settings
+
+
+# Linear regression model
+lmodel <- lm(sf36_score ~ hospital_days, data = mhealth_data)
+
+```
+
+
+```{r assumptions of lm}
+
+# Pearson
+t_pearson <- mhealth_data %>%
+  summarise(
+    Pearsonr = cor.test(hospital_days, sf36_score, method="pearson")$estimate,
+    tstat    = cor.test(hospital_days, sf36_score, method="pearson")$statistic,
+    pval     = cor.test(hospital_days, sf36_score,method="pearson")$p.value) %>% 
+  kable(
+    caption  = "Pearson's correlation coefficient",
+    format   = "latex",
+    booktabs = TRUE, 
+    align    = c("c", "c", "c")
+    ) %>% 
+  kable_styling(latex_options = "hold_position") %>% 
+  column_spec(1:3, width = "2in")
+
+
+# Variability of residuals
+p_scatter_res_var <- ggplot(lmodel, aes(x = .fitted, y = .resid)) +
+  geom_point() + geom_hline(aes(yintercept = 0), color = "red") +
+  labs(
+    title = "Figure 7: Funnel-shaped distribution of the residuals",
+    y = 'Residuals',
+    x = 'Fitted values',
+    caption = caption
+  ) +
+  plot_theme_settings
+
+
+# Normality of residuals
+res <- resid(lmodel) # Used in Shapiro test
+
+```
+
+
+```{r third variable}
+
+p_scatter_by_cat <- mhealth_data %>%
+  ggplot(aes(x = hospital_days, y = sf36_score)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = lm,
+              color = "red",
+              se = FALSE) +
+  labs(
+    x = "Hospital days",
+    y = "Sf36 health scores",
+    title = "Figure 8: Length of hospitalisation and Sf36 health score by app usage",
+    caption = caption
+  ) +
+  plot_theme_settings + facet_wrap(facets =  ~ mHealth_app_usage)
+
+```
+
+## Part 1
+
+A total of `r n_total` participants were surveyed, of which `r n_males` (50.2%) were males and `r n_females` (49.8%) were females. The age of the participants ranged between 18.4 and 106.2 years, with a mean of 60.0 and a standard deviation of 12.0.
+
+```{r t-demography}
+t_demography
+```
+
+Figure 1 shows that the median age and age variability were comparable between sexes, with the data clustered symmetrically around central values.
+
+```{r fig.height = 4, fig.width = 6}
+p_age_variance
+```
+
+Hypertension, diagnosed in 61.5% of subjects, was the most common chronic condition, followed by diabetes (24.0%) and asthma (14.4%).
+
+## Part 2
+
+### Medical condition and frequency of mHealth app usage
+
+In this section, I explore the relationship between the chronic medical condition and frequency of mHealth app usage.
+
+\textcolor{brown}{H0:} There is no association between the type of chronic condition and frequency of mHealth app usage.
+
+\textcolor{brown}{H1:} There *is* an association between the type of chronic condition and frequency of mHealth app usage.
+
+#### Chi-square test
+
+*Chi-square test for independence* was used to assess this relationship. The Chi-square test is a robust statistical tool for revealing associations between two categorical variables -- *mHealth_app_usage* and *condition* in this particular case.
+
+The Chi-square test compares observed frequencies in each category (Table 2) to frequencies that would be expected for independent variables. In other words, it estimates whether the counts we see are significantly different from the counts we would expect to see if there was no association between the two variables.
+
+```{r}
+t_contingency_table
+```
+
+```{r}
+chisq.test(contingency_table)
+```
+
+The Chi-square test yielded a test statistic of `r round(chisq$statistic, 2)` (df = `r chisq$parameter`) and a p-value of `r round(chisq$p.value, 2)`. A p-value greater than our significance level of 0.05 suggests that there is no association between the tested variables. Hence, we cannot reject the null hypothesis that mHealth app frequency usage is independent from the underlying condition.
+
+#### Conclusion
+
+The frequency of mHealth app usage is unlikely to be related to the medical condition.
+
+### Does adherence among regular app users vary by sex?
+
+Next, I narrowed the sample to regular app users and investigated whether adherence to medication was different between males and females.
+
+\textcolor{brown}{H0:} Among regular app users, the means of medication adherence are equal between males and females.
+
+\textcolor{brown}{H1:} Among regular app users, the means of medication adherence differ between males and females.
+
+*Note:* For some individuals, adherence exceeded 100%. This may indicate that the subjects took more than their prescribed dose of the medication. Capping adherence at 100% could be considered for future analysis. In this report, adherence greater than 100% was allowed.
+
+#### Independent samples t-test
+
+The mean medication adherence was `r adherence_stats$mean[2]`% (SD = `r adherence_stats$sd[2]`) among males and `r adherence_stats$mean[1]`% (SD = `r adherence_stats$sd[1]`) among females. To check whether this difference was statistically significant, I performed the *independent samples t-test*. The independent samples t-test compares the means of two independent groups and outputs a p-value.
+
+#### Assumption of homogeneity of variance
+
+A key assumption that should be checked prior to performing the t-test is *homogeneity of variance*, which means similar within-group variability of data.
+
+Figure 2 illustrates comparable variances in medication adherence for male and female subjects.
+
+```{r fig.height = 3.85, fig.width = 6}
+p_adherence_regular_boxplot
+```
+
+To obtain a obtain a quantitative estimation, *Levene's test for homogeneity of variance* was performed.
+
+```{r}
+leveneTest(medication_adherence ~ sex, data = adherence_regular)
+```
+
+The test produced an F-statistic of 0.75 (df1 = 1, df2 = 1733) and a p-value of 0.38, suggesting that the null hypothesis of the equality of variances holds.\
+
+#### Results of the t-test
+
+```{r t-test}
+t.test(medication_adherence ~ sex, data = adherence_regular)
+```
+
+The t-test produced a test statistic of 1.09 (df = 1732.1) and a p-value of 0.27, suggesting that the mean values of medication adherence are equal between sexes.
+
+#### Assumption of normal distribution
+
+The histogram (Figure 3) shows distribution that is close to normal.
+
+```{r fig.height = 3, fig.width = 6}
+p_adherence_regular_hist
+```
+
+```{r}
+shapiro.test(adherence_regular$medication_adherence)
+```
+
+The *Shapiro-Wilk normality test* yielded an insignificant p-value of 0.22, which indicates normal distribution.
+
+Overall, it is safe to say that the assumption of normal distribution was met.
+
+#### Conclusion
+
+The evidence suggests that medication adherence among the most active mHealth app users does not depend on sex.
+
+## Part 3
+
+In this section, I investigate whether individuals who use mHealth app more frequently are more likely to adhere to their prescription.
+
+```{r}
+t_adherence_all
+```
+
+The data strongly suggests that medication adherence increases with app usage: from an average of 44.9% (SD = 6.1) in the "Never" category to 94.1% (SD = 5.0) in the "Regularly" category. The box-plot (Figure 4) clearly illustrates a trend.
+
+```{r fig.height = 4, fig.width = 6}
+p_adherence_all_boxplot
+```
+
+### Analysis of variance (ANOVA)
+
+To test the hypothesis that the mean adherence to medication varies between groups, a *one-way Analysis of Variance (ANOVA)* was performed. ANOVA is a powerful statistical tool that enables robust multiple-group comparison. ANOVA is preferred to multiple t-tests in cases when more than two groups are compared since it minimises the risk of incorrectly rejecting the null hypothesis and streamlines the analysis.
+
+\textcolor{brown}{H0:} Mean adherence is equal in all groups.
+
+\textcolor{brown}{H1:} Mean adherence in at least one group differs from the others.
+
+```{r}
+summary(ANOVA1)
+```
+
+The results of one-way ANOVA indicated a statistically significant difference in medication adherence between at least one pair (F(3, 8950) = 30326, p \< 0.001).
+
+#### Post-hoc analysis
+
+```{r}
+anova1_emmeans <- emmeans(ANOVA1, "mHealth_app_usage")
+anova_pairs <- pairs(anova1_emmeans)
+confint(anova1_emmeans)
+anova_pairs
+```
+
+Post-hoc analysis with pairwise comparison was performed to investigate the differences between individual pairs. *Tukey’s HSD Test* for multiple comparisons revealed that the mean adherence to medication was significantly different (p \< 0.001) between all compared groups.
+
+### Assumptions of ANOVA
+
+#### Normality of the residuals
+
+ANOVA assumes normal distribution of the residuals. A residual is a difference between an observed value and a group mean.
+
+Figure 5 shows normal distribution of the residuals around the mean. The assumption holds.
+
+```{r fig.height = 3, fig.width = 6}
+p_res_normality
+```
+
+#### Homogeneity of variance
+
+Levene's test for homogeneity of variance yielded p-value \< 0.001, indicating that within-group variances may be unequal.
+
+```{r levenes test}
+leveneTest(medication_adherence ~ mHealth_app_usage, data = mhealth_data)
+```
+
+### Conclusion
+
+Although the assumptions of homogeneity of variances was likely violated, this violation is not critical and does not invalidate the results of ANOVA. Other assumptions of the test -- independence of observations and normality of the residuals -- were met and the p-value was highly significant. On the whole, test results can be considered reliable.
+
+### Recommendations
+
+Based on the evidence, I recommend promoting mHealth app. It is highly likely that frequent app usage contributes to better compliance
+
+## Part 4
+
+There is some evidence that longer hospital stays correlate with lower Sf36 health scores. Linear regression modelling was used to test this hypothesis.
+
+### Simple linear regression
+
+A simple linear regression model is a formulaic expression of the relationship between two numeric variables. This relationship can be graphed as a straight line. A regression coefficient of the linear model, also called the *slope*, defines the angle of the inclination of the line and a rate at which the dependent variable (output) changes based on the independent variable (input). A non-zero slope indicates meaningful linear relationship.
+
+\textcolor{brown}{H0:} The regression coefficient is equal to 0.
+
+\textcolor{brown}{H1:} The regression coefficient is not equal to 0.
+
+```{r lmodel}
+
+confint(lmodel)
+summary(lmodel)
+
+```
+
+The regression coefficient for *hospital_days* is -1.6 [95% CI: -1.7 to -1.5] and the linear model intercept is 49.7 [95% CI: 49.4 to 49.9]. This means that Sf36 health score is expected to drop by 1.6 points for every extra day spent in a hospital. Both coefficients are significantly different from 0 (slope: t = -37.3, p \< 0.001; intercept: t = 372.4, p \< 0.001). The model explains 13% of the variance in Sf36 health scores (R-squared = 0.13).
+
+The standard error of the residuals (differences between observed and predicted Sf36 health scores) is quite high (9.8), meaning that the response variable deviates significantly from the regression line. However, the F statistic is high (F = 1388), suggesting a significant relationship between the length of hospital stay and Sf36 health score.
+
+### Assumptions of linear regression
+
+#### Linearity of relationship
+
+Figure 6 shows evidence of a negative linear relationship (Sf36 health scores decrease as the length of hospital stay increases).
+
+```{r fig.height = 3, fig.width = 6}
+p_scatter
+
+```
+
+*Pearson's product moment correlation coefficient* (a measure of strength and direction of correlation) confirmed a statistically significant negative linear relationship of moderate strength (r = -0.36, t = -37.25, p \< 0.001).
+
+#### Constant variability of the residuals
+
+The plot shows unequal variability of the residuals across independent variables, suggesting that the assumption of constant variability is violated (Figure 7).
+
+```{r fig.height = 3, fig.width = 6}
+p_scatter_res_var
+
+```
+
+#### Normality of the residuals
+
+The Shapiro-Wilk test of the residuals outputted a slightly significant p-value of 0.02, suggesting some deviation from normality.
+
+```{r normality of residuals}
+#shapiro.test(res[1:5000])
+```
+
+### Influence of the third variable
+
+```{r}
+p_scatter_by_cat
+
+```
+
+The graph illustrates the relationship between the length of hospitalisation and Sf36 health scores across different categories of mHealth app users. Evidence of negative linear relationship can be seen in the "Never" and "Rarely" app usage categories. No signs of correlation are observed among occasional and regular app users.
+
+What attracts attention is that subjects, who use mHealth app more frequently, seem to spend fewer days in the hospital than those, who never use the app or use it rarely.
+
+### Conclusion
+
+Although there is evidence of a linear relationship between the length of hospital stay and Sf36 health scores, unequal variances of the residuals raise concern about the predictive accuracy of the model. Other methods, such as weighted least squares, may be more appropriate. Impact of other factors, particularly the frequency of mHealth app usage, should be investigated in future studies.
